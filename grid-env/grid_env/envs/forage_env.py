@@ -151,9 +151,11 @@ class ForageEnv(grid_env.GridEnv):
 
     def getCountLocation(self, s):
         # Compute c(location, i)
-        c_li = 1
+        c_li = 0.8
         if s in self.internal["lastVisitAt"]:
+
             c_li = self.timestep - self.internal["lastVisitAt"][s]
+            print("Called!", s, self.timestep, self.internal)
             c_li = 1 - 1.0 / c_li
         return c_li
 
@@ -162,7 +164,7 @@ class ForageEnv(grid_env.GridEnv):
         # compute c(location, action, i)
         c_la = 1
         if (s, a) in self.internal["lastLocActionAt"]:
-            c_la = self.timestep - self.internal["lastLocActionAt"]
+            c_la = self.timestep - self.internal["lastLocActionAt"][(s, a)]
             c_la = 1 - 1.0 / c_la
         return c_la
 
@@ -175,10 +177,9 @@ class ForageEnv(grid_env.GridEnv):
         # and feed them into the network to train the network.
         """
 
+        self.internal["lastVisitAt"][self.s] = self.timestep
+        self.internal["lastLocActionAt"][(self.s, a)] = self.timestep
         s, r, d, model = super()._step(a)
-
         self.timestep += 1
-        self.internal["lastVisitAt"][s] = self.timestep
-        self.internal["lastLocActionAt"][(s, a)] = self.timestep
 
         return (s, r, d, model)
