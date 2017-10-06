@@ -31,6 +31,7 @@ def accumulate_gradient_to_var(ps_id, average_grads, opt):
     average_grads = [tup for tup in average_grads if tup[0] is not None]
     # update_target_fn will be called everytime when new averaged_grads arrives at the ps.
     update_target_fn = []
+    print(copied_local_vars)
     for tup in zip(average_grads, copied_local_vars):
         grad, _ = tup[0]
         copy_target = tup[1]
@@ -116,6 +117,10 @@ def main(_):
   # Get ps id for this worker.
   ps_task_id = get_ps_task_id(FLAGS.task_index, server_num)
 
+  group_size = worker_num // server_num
+  is_group_chief = (FLAGS.task_index < group_size)
+  is_chief = (FLAGS.task_index == 1)
+
   # Build central ps
   with tf.device("job:ps/task:%d" % ps_server_id):
     ps_x = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
@@ -131,33 +136,6 @@ def main(_):
 
     # Create copy to accumulate gradients.
     _ = inference(x, 0, is_copy=True) 
-
-  with tf.device("job:ps/task:1"):
-    x1 = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
-    y1_ = tf.placeholder(tf.float32, [None, 10])
-    y1 = inference(x1, 1)
-
-    # Create copy to accumulate gradients.
-    _ = inference(x1, 1, is_copy=True) 
-  
-  if FLAGS.job_name == "ps":
-    server.join()
-
-  ###### Build the graph for different worker groups, using the same params. #####
-  # print(ps_task_id)
-  with tf.device(tf.train.replica_device_setter(
-      worker_device="/job:worker/task:%d" % FLAGS.task_index,
-      ps_device="/job:ps/task:%d" % ps_task_id,
-      cluster=cluster)):
-
-    if ps_task_id == 1:
-      x = x1
-      y = y1
-      y_ = y1_
-
-    group_size = worker_num // server_num
-    is_group_chief = (FLAGS.task_index < group_size)
-    is_chief = (FLAGS.task_index == 1)
 
     global_step = tf.Variable(0, name="global_step", trainable=False)
 
@@ -175,14 +153,13 @@ def main(_):
                            total_num_replicas=group_num_replicas)
     # train_op = opt.minimize(loss, global_step=global_step)
     grad = sync_opt.compute_gradients(loss)
-    # print(grad, FLAGS.task_index)
+    print(grad, FLAGS.task_index)
     train_op = sync_opt.apply_gradients(grad, global_step=global_step)
 
     # This step only carry out by the chief, after grad being computed.
     # if is_group_chief:
-    accumulate_op = accumulate_gradient_to_var(ps_task_id, grad, opt)
+    accumulate_op = accumulate_gradient_to_var(0, grad, opt)
     update_op, zero_copy_op, fetch_ps_op = update_var(ps_task_id, ps_server_id)
-
 
     local_init_op = sync_opt.local_step_init_op
     if is_chief:
@@ -191,6 +168,76 @@ def main(_):
     chief_queue_runner = sync_opt.get_chief_queue_runner()
     sync_init_op = sync_opt.get_init_tokens_op()
 
+
+  with tf.device("job:ps/task:1"):
+    x1 = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
+    y1_ = tf.placeholder(tf.float32, [None, 10])
+    y1 = inference(x1, 1)
+
+    # Create copy to accumulate gradients.
+    _ = inference(x1, 1, is_copy=True) 
+
+    global_step_1 = tf.Variable(0, name="global_step", trainable=False)
+
+    loss_1 = -tf.reduce_sum(y1_ * tf.log(tf.clip_by_value(y1, 1e-10, 1.0)))
+
+    correct_prediction_1 = tf.equal(tf.argmax(y1_, 1), tf.argmax(y1, 1))
+    accuracy_1 = tf.reduce_mean(tf.cast(correct_prediction_1, tf.float32))
+
+    opt_1 = tf.train.AdagradOptimizer(0.01)
+
+    group_num_replicas = worker_num // server_num
+    if FLAGS.task_index > group_num_replicas * server_num:
+      group_num_replicas += 1
+    sync_opt_1 = tf.train.SyncReplicasOptimizer(opt_1, replicas_to_aggregate=group_num_replicas,
+                           total_num_replicas=group_num_replicas)
+    # train_op = opt.minimize(loss, global_step=global_step)
+    grad_1 = sync_opt.compute_gradients(loss_1)
+    print(grad, FLAGS.task_index)
+    train_op_1 = sync_opt.apply_gradients(grad_1, global_step=global_step_1)
+
+    # This step only carry out by the chief, after grad being computed.
+    # if is_group_chief:
+    accumulate_op_1 = accumulate_gradient_to_var(1, grad_1, opt_1)
+    update_op_1, zero_copy_op_1, fetch_ps_op_1 = update_var(ps_task_id, ps_server_id)
+
+    local_init_op_1 = sync_opt.local_step_init_op
+    if is_chief:
+      local_init_op_1 = sync_opt.chief_init_op
+    ready_for_local_init_op_1 = sync_opt.ready_for_local_init_op
+    chief_queue_runner_1 = sync_opt.get_chief_queue_runner()
+    sync_init_op_1 = sync_opt.get_init_tokens_op()
+  
+  if FLAGS.job_name == "ps":
+    server.join()
+
+  ###### Build the graph for different worker groups, using the same params. #####
+  # print(ps_task_id)
+  with tf.device(tf.train.replica_device_setter(
+      worker_device="/job:worker/task:%d" % FLAGS.task_index,
+      ps_device="/job:ps/task:%d" % ps_task_id,
+      cluster=cluster)):
+
+    if ps_task_id == 1:
+      x = x1
+      y = y1
+      y_ = y1_
+      global_step = global_step_1
+      loss = loss_1
+      correct_prediction = correct_prediction_1
+      accuracy = accuracy_1
+      opt = opt_1
+      sync_opt = sync_opt_1
+      grad = grad_1
+      train_op = train_op_1
+      accumulate_op = accumulate_op_1
+      update_op = update_op_1
+      zero_copy_op = zero_copy_op_1
+      fetch_ps_op = fetch_ps_op_1
+      local_init_op = local_init_op_1
+      ready_for_local_init_op = ready_for_local_init_op_1
+      chief_queue_runner = chief_queue_runner_1
+      sync_init_op = sync_init_op_1
 
     saver = tf.train.Saver()
 
@@ -232,7 +279,7 @@ def main(_):
       import pdb; pdb.set_trace()
     sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
 
-    if is_chief:
+    if is_group_chief:
       sess.run(sync_init_op)
       sv.start_queue_runners(sess, [chief_queue_runner])
 
