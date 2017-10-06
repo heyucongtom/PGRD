@@ -123,6 +123,22 @@ def main(_):
     ps_y = inference(ps_x, ps_server_id)
     correct_prediction = tf.equal(tf.argmax(ps_y_, 1), tf.argmax(ps_y, 1))
     ps_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+  with tf.device("job:ps/task:0"):
+    x = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
+    y_ = tf.placeholder(tf.float32, [None, 10])
+    y = inference(x, 0)
+
+    # Create copy to accumulate gradients.
+    _ = inference(x, 0, is_copy=True) 
+
+  with tf.device("job:ps/task:1"):
+    x1 = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
+    y1_ = tf.placeholder(tf.float32, [None, 10])
+    y1 = inference(x1, 1)
+
+    # Create copy to accumulate gradients.
+    _ = inference(x1, 1, is_copy=True) 
   
   if FLAGS.job_name == "ps":
     server.join()
@@ -133,15 +149,15 @@ def main(_):
       worker_device="/job:worker/task:%d" % FLAGS.task_index,
       ps_device="/job:ps/task:%d" % ps_task_id,
       cluster=cluster)):
+
+    if ps_task_id == 1:
+      x = x1
+      y = y1
+      y_ = y1_
+
     group_size = worker_num // server_num
     is_group_chief = (FLAGS.task_index < group_size)
     is_chief = (FLAGS.task_index == 1)
-    x = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
-    y_ = tf.placeholder(tf.float32, [None, 10])
-    y = inference(x, ps_task_id)
-
-    # Create copy to accumulate gradients.
-    _ = inference(x, ps_task_id, is_copy=True) 
 
     global_step = tf.Variable(0, name="global_step", trainable=False)
 
@@ -248,4 +264,3 @@ def main(_):
 
 if __name__ == "__main__":
   tf.app.run()
-
