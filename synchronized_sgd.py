@@ -124,7 +124,7 @@ def run_model(job_name, task_index):
     sess_config = tf.ConfigProto(
       allow_soft_placement=True,
       log_device_placement=False,
-      device_filters=["/job:ps", "/job:worker/task:0", "/job:worker/task:1"])
+      device_filters=["/job:ps", "/job:worker/task:0"])
     sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
     if is_chief:
       # Chief worker will start the chief queue runner and call the init op.
