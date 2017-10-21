@@ -136,6 +136,13 @@ def run_model(job_name, task_index):
     local_step = 0
     step = 0
 
+    test_accuracy = sess.run(accuracy, feed_dict={x: mnist.test.images,
+                                          y_: mnist.test.labels})
+    print("Worker %d: training step %d done (global step: %d)" %
+    (task_index, local_step, step))
+    print("On trainer %d, iteration %d ps it reaches %f accuracy" % (task_index, step, test_accuracy))
+        
+
     while not sv.should_stop() and step < 1000000:
       batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size // num_workers)
 
@@ -143,7 +150,6 @@ def run_model(job_name, task_index):
       _ = sess.run([train_op], feed_dict=train_feed)
       step = sess.run([global_step])[0]
       local_step += 1
-      now = time.time()
 
 
       if step % 1 == 0:
@@ -152,8 +158,8 @@ def run_model(job_name, task_index):
         #   test_writer.add_summary(summary, i)
         test_accuracy = sess.run(accuracy, feed_dict={x: mnist.test.images,
                                               y_: mnist.test.labels})
-        print("%f: Worker %d: training step %d done (global step: %d)" %
-          (now, task_index, local_step, step))
+        print("Worker %d: training step %d done (global step: %d)" %
+          (task_index, local_step, step))
         print("On trainer %d, iteration %d ps it reaches %f accuracy" % (task_index, step, test_accuracy))
         # step_and_accuracy.append((step, test_accuracy))
       # if step % 20000 == 0:
