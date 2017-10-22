@@ -51,7 +51,6 @@ def run_model(job_name, task_index, barrier):
   # Create cluster:
   from tensorflow.examples.tutorials.mnist import input_data
   
-
   worker_hosts = ["localhost:22226"]
   cluster = tf.train.ClusterSpec({"ps": ["localhost:22225"],
                                 "worker": worker_hosts})
@@ -80,9 +79,7 @@ def run_model(job_name, task_index, barrier):
     correct_prediction = tf.equal(tf.argmax(y_, 1), tf.argmax(y, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-    # summary_op = tf.summary.scalar("global_accuracy", accuracy)
     opt = tf.train.AdagradOptimizer(0.02)
-    # grad_from_opt = opt.compute_gradients(loss)
     # Using synchronization. We can modify the source code to write our own
     # optimizer, but this one is very convenient.
     opt = tf.train.SyncReplicasOptimizer(opt, replicas_to_aggregate=num_workers,
@@ -163,7 +160,6 @@ def run_model(job_name, task_index, barrier):
 
       step = sess.run([global_step])[0]
       local_step += 1
-
 
       if step % 1 == 0:
         test_accuracy = sess.run(accuracy, feed_dict={x: mnist.test.images,
